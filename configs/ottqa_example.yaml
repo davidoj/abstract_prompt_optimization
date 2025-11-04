@@ -1,0 +1,93 @@
+# Example configuration for the OTT-QA prompt optimization experiment.
+dataset:
+  train: /path/to/ottqa/train.jsonl
+  val: /path/to/ottqa/dev.jsonl
+  test: /path/to/ottqa/test.jsonl
+
+model:
+  provider: openrouter
+  model: openrouter/anthropic/claude-3-haiku
+  temperature: 0.1
+  max_tokens: 1024
+  request_timeout: 120
+  api_key_env: OPENROUTER_API_KEY
+  http_referer: https://yourdomain.example
+  app_name: ott-qa-dspy
+
+max_examples: null
+output_dir: results
+
+strategies:
+  - name: direct-gepa
+    kind: direct
+    prompt_template: |
+      You answer questions about Wikipedia tables and linked passages. Combine both contexts.
+      Always reply with JSON containing:
+        - "answer": concise string answer.
+        - "evidence_cells": list of table cell identifiers (if relevant).
+        - "evidence_sentences": list of supporting passage sentences.
+      Cite specific row/column IDs for table cells when possible. Ensure JSON is valid.
+    gepa:
+      population_size: 8
+      generations: 10
+      bootstrap_rounds: 3
+      mutation_rate: 0.35
+      crossover_rate: 0.45
+      max_bootstrapped_demos: 4
+      min_bootstrapped_demos: 2
+      score_metric: exact_match
+
+  - name: abstract-gepa
+    kind: abstract
+    prompt_template: |
+      You are a careful OTT-QA solver. Follow the `qa_instruction` guidance. Respond with JSON
+      containing keys `answer`, `evidence_cells`, `evidence_sentences`. Ensure the answer is
+      exact, cite evidence, and keep JSON valid.
+    interpreter_template: |
+      You are the prompt interpreter for an OTT-QA assistant. Given a dataset profile and
+      a high-level strategy, produce an actionable QA instruction. Make sure every element in the
+      strategy template below is addressed explicitly in the instruction you produce.
+    strategy_template:
+      overview: >-
+        We answer OTT-QA by balancing table-first exploration with passage verification.
+      steps:
+        - Skim the table headers to understand the schema and locate relevant rows.
+        - Extract candidate answers from the table and restate the supporting row in natural
+          language.
+        - Cross-check the candidate answer in the passages, quoting confirming sentences.
+        - Compose the final answer and evidence lists in strict JSON format.
+      tactics:
+        - When multiple rows match, compare distinguishing columns before deciding.
+        - Use concise bullet-style reasoning before emitting the JSON.
+      prompt_construction:
+        - Insert two few-shot QA exemplars that demonstrate proper JSON and evidence citations.
+        - Restate the JSON schema immediately before generation to reinforce structure.
+        - Include a short checklist highlighting pitfalls to avoid.
+      execution_guidance:
+        - After planning, narrate how table and passage evidence connect prior to final JSON.
+        - Prefer explicit cell references (Row X, Column Y) in intermediate reasoning.
+      failure_modes:
+        - Forgetting to cite table cell coordinates.
+        - Returning non-JSON text or trailing commentary.
+        - Trusting the table without verifying in passages when ambiguity remains.
+      reminders:
+        - Always include both `evidence_cells` and `evidence_sentences` arrays.
+        - Paraphrase the question to ensure you are targeting the right entity/value.
+      repetition: Repeat the JSON schema right before generation to reduce format drift.
+      examples:
+        - title: Table-first then passage confirmation
+          description: Identify the "host city" from the table row, then cite the passage sentence
+            that confirms the same city.
+          takeaway: Always align table claims with textual corroboration.
+      custom_sections:
+        Verification Checklist: Double-check that every cited evidence item directly supports the
+          final answer string.
+    gepa:
+      population_size: 8
+      generations: 10
+      bootstrap_rounds: 3
+      mutation_rate: 0.35
+      crossover_rate: 0.45
+      max_bootstrapped_demos: 4
+      min_bootstrapped_demos: 2
+      score_metric: exact_match
